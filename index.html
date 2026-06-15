@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Hand Controller — Mathisha</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: #000;
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+h1 {
+  font-size: 0.75rem;
+  letter-spacing: 0.3em;
+  color: #00ff88;
+  padding: 6px 0;
+  text-transform: uppercase;
+  z-index: 10;
+}
+
+#wrap {
+  position: relative;
+  width: 640px;
+  max-width: 100vw;
+  flex: 1;
+}
+
+/* Camera canvas — background */
+#camCanvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+}
+
+/* Three.js canvas — on top, transparent bg */
+#threeCanvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+
+video { display: none; }
+
+/* Gesture message center */
+#gesture-overlay {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  z-index: 20;
+  transition: opacity 0.3s;
+}
+#ov-emo  { font-size: 2.5rem; filter: drop-shadow(0 0 10px currentColor); }
+#ov-msg  {
+  font-size: 1.4rem;
+  font-weight: 900;
+  font-family: 'Arial Black', sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 16px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.5);
+  margin-top: 6px;
+  text-shadow: 0 0 10px currentColor, 0 0 30px currentColor;
+}
+.color-hi   { color: #00ff88; }
+.color-good { color: #ffcc00; }
+.color-math { color: #ff66ff; }
+.color-like { color: #ff4466; }
+.color-sus  { color: #ff6600; }
+
+/* Loading */
+#loading {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  text-align: center; color: #00ff88; z-index: 30;
+}
+#loading .spinner {
+  width: 36px; height: 36px;
+  border: 3px solid #003322;
+  border-top-color: #00ff88;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 10px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Bottom bar */
+#info-bar {
+  width: 640px; max-width: 100vw;
+  background: #0d0d1a;
+  border-top: 2px solid #00ff88;
+  padding: 7px 14px;
+  display: flex; align-items: center; gap: 10px;
+  z-index: 10; min-height: 52px;
+}
+#bar-icon { font-size: 1.8rem; min-width: 36px; text-align: center; }
+#bar-name { font-size: 1rem; font-weight: bold; color: #00ff88; letter-spacing: 0.1em; text-transform: uppercase; }
+#bar-desc { font-size: 0.68rem; color: #7777aa; }
+
+#finger-status { display:flex; gap:5px; margin-left:auto; }
+.finger-dot {
+  display:flex; flex-direction:column; align-items:center; gap:2px;
+  font-size:0.5rem; color:#444466; letter-spacing:0.04em;
+}
+.finger-dot .dot {
+  width:10px; height:10px; border-radius:50%;
+  background:#1a1a2e; border:1px solid #334; transition:all 0.1s;
+}
+.finger-dot.up .dot { background:#00ff88; border-color:#00ff88; box-shadow:0 0 5px #00ff88; }
+.finger-dot.up { color:#00ff88; }
+
+/* Cheatsheet */
+#cheat {
+  width:640px; max-width:100vw;
+  background:#08080f; border-top:1px solid #1a1a2e;
+  display:flex; justify-content:space-around; padding:4px 8px; z-index:10;
+}
+.cs { display:flex; align-items:center; gap:4px; font-size:0.6rem; color:#555577; }
+.cs span { font-size:0.95rem; }
+
+/* Hand landmark overlay labels */
+#handCanvas {
+  position: absolute;
+  top:0; left:0; width:100%; height:100%;
+  pointer-events:none; z-index:15;
+}
+</style>
+</head>
+<body>
+<h1>✋ 3D Hand Controller — Mathisha Edition</h1>
+
+<div id="wrap">
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="camCanvas"></canvas>
+  <canvas id="handCanvas"></canvas>
+  <canvas id="threeCanvas"></canvas>
+
+  <div id="gesture-overlay" style="display:none">
+    <div id="ov-emo"></div>
+    <div id="ov-msg" class="msg"></div>
+  </div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div style="font-size:0.72rem;letter-spacing:0.2em">LOADING…</div>
+  </div>
+</div>
+
+<div id="info-bar">
+  <div id="bar-icon">—</div>
+  <div style="flex:1">
+    <div id="bar-name">Waiting…</div>
+    <div id="bar-desc">Show your hand to the camera</div>
+  </div>
+  <div id="finger-status">
+    <div class="finger-dot" id="dot-thumb"><div class="dot"></div>THUMB</div>
+    <div class="finger-dot" id="dot-index"><div class="dot"></div>INDEX</div>
+    <div class="finger-dot" id="dot-middle"><div class="dot"></div>MID</div>
+    <div class="finger-dot" id="dot-ring"><div class="dot"></div>RING</div>
+    <div class="finger-dot" id="dot-pinky"><div class="dot"></div>PINKY</div>
+  </div>
+</div>
+
+<div id="cheat">
+  <div class="cs"><span>🖐️</span> HI</div>
+  <div class="cs"><span>🤙</span> GOOD</div>
+  <div class="cs"><span>👍</span> THIS IS MATHISHA</div>
+  <div class="cs"><span>✊</span> I LIKE YOU</div>
+  <div class="cs"><span>✌️</span> A SUS FILE</div>
+</div>
+
+<!-- Three.js r128 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// 3D STICK MAN via Three.js
+// ═══════════════════════════════════════════════════════════
+
+const threeCanvas = document.getElementById('threeCanvas');
+const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x000000, 0); // transparent
+
+const scene  = new THREE.Scene();
+const camera3 = new THREE.PerspectiveCamera(60, 640/480, 0.1, 100);
+camera3.position.set(0, 1.2, 4.5);
+camera3.lookAt(0, 1, 0);
+
+// Lights
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dir = new THREE.DirectionalLight(0x00ff88, 1.2);
+dir.position.set(2, 4, 3);
+scene.add(dir);
+const dir2 = new THREE.DirectionalLight(0xff66ff, 0.5);
+dir2.position.set(-2, 2, -2);
+scene.add(dir2);
+
+// Material
+const matBody   = new THREE.MeshPhongMaterial({ color: 0x00ff88, emissive: 0x003322, shininess: 80 });
+const matJoint  = new THREE.MeshPhongMaterial({ color: 0xff3355, emissive: 0x330011, shininess: 120 });
+const matHead   = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0x332200, shininess: 100 });
+
+function makeCylinder(rTop, rBot, h, mat) {
+  const g = new THREE.CylinderGeometry(rTop, rBot, h, 12);
+  return new THREE.Mesh(g, mat);
+}
+function makeSphere(r, mat) {
+  const g = new THREE.SphereGeometry(r, 16, 16);
+  return new THREE.Mesh(g, mat);
+}
+
+// ── Build stick man ──────────────────────────────────────────
+const man = new THREE.Group();
+scene.add(man);
+
+// Body parts — stored for animation
+const parts = {};
+
+// Head
+parts.head = makeSphere(0.22, matHead);
+parts.head.position.set(0, 2.45, 0);
+man.add(parts.head);
+
+// Neck
+parts.neck = makeCylinder(0.07, 0.07, 0.2, matBody);
+parts.neck.position.set(0, 2.15, 0);
+man.add(parts.neck);
+
+// Torso
+parts.torso = makeCylinder(0.18, 0.22, 0.8, matBody);
+parts.torso.position.set(0, 1.65, 0);
+man.add(parts.torso);
+
+// Hips
+parts.hips = makeSphere(0.25, matBody);
+parts.hips.position.set(0, 1.2, 0);
+man.add(parts.hips);
+
+// Shoulder joints
+parts.lShoulder = makeSphere(0.1, matJoint);
+parts.lShoulder.position.set(-0.35, 2.05, 0);
+man.add(parts.lShoulder);
+
+parts.rShoulder = makeSphere(0.1, matJoint);
+parts.rShoulder.position.set(0.35, 2.05, 0);
+man.add(parts.rShoulder);
+
+// Arms — groups for rotation
+parts.lUpperArmGrp = new THREE.Group();
+parts.lUpperArmGrp.position.set(-0.35, 2.05, 0);
+man.add(parts.lUpperArmGrp);
+const lUpperArm = makeCylinder(0.06, 0.06, 0.55, matBody);
+lUpperArm.position.set(0, -0.275, 0);
+parts.lUpperArmGrp.add(lUpperArm);
+
+parts.lElbow = makeSphere(0.08, matJoint);
+parts.lElbow.position.set(0, -0.55, 0);
+parts.lUpperArmGrp.add(parts.lElbow);
+
+parts.lLowerArmGrp = new THREE.Group();
+parts.lLowerArmGrp.position.set(0, -0.55, 0);
+parts.lUpperArmGrp.add(parts.lLowerArmGrp);
+const lLowerArm = makeCylinder(0.05, 0.05, 0.5, matBody);
+lLowerArm.position.set(0, -0.25, 0);
+parts.lLowerArmGrp.add(lLowerArm);
+const lHand = makeSphere(0.08, matJoint);
+lHand.position.set(0, -0.5, 0);
+parts.lLowerArmGrp.add(lHand);
+
+// Right arm
+parts.rUpperArmGrp = new THREE.Group();
+parts.rUpperArmGrp.position.set(0.35, 2.05, 0);
+man.add(parts.rUpperArmGrp);
+const rUpperArm = makeCylinder(0.06, 0.06, 0.55, matBody);
+rUpperArm.position.set(0, -0.275, 0);
+parts.rUpperArmGrp.add(rUpperArm);
+
+parts.rElbow = makeSphere(0.08, matJoint);
+parts.rElbow.position.set(0, -0.55, 0);
+parts.rUpperArmGrp.add(parts.rElbow);
+
+parts.rLowerArmGrp = new THREE.Group();
+parts.rLowerArmGrp.position.set(0, -0.55, 0);
+parts.rUpperArmGrp.add(parts.rLowerArmGrp);
+const rLowerArm = makeCylinder(0.05, 0.05, 0.5, matBody);
+rLowerArm.position.set(0, -0.25, 0);
+parts.rLowerArmGrp.add(rLowerArm);
+const rHand = makeSphere(0.08, matJoint);
+rHand.position.set(0, -0.5, 0);
+parts.rLowerArmGrp.add(rHand);
+
+// Legs
+parts.lHipJoint = makeSphere(0.1, matJoint);
+parts.lHipJoint.position.set(-0.18, 1.2, 0);
+man.add(parts.lHipJoint);
+
+parts.rHipJoint = makeSphere(0.1, matJoint);
+parts.rHipJoint.position.set(0.18, 1.2, 0);
+man.add(parts.rHipJoint);
+
+parts.lUpperLegGrp = new THREE.Group();
+parts.lUpperLegGrp.position.set(-0.18, 1.2, 0);
+man.add(parts.lUpperLegGrp);
+const lUpperLeg = makeCylinder(0.08, 0.07, 0.6, matBody);
+lUpperLeg.position.set(0, -0.3, 0);
+parts.lUpperLegGrp.add(lUpperLeg);
+const lKnee = makeSphere(0.09, matJoint);
+lKnee.position.set(0, -0.6, 0);
+parts.lUpperLegGrp.add(lKnee);
+
+parts.lLowerLegGrp = new THREE.Group();
+parts.lLowerLegGrp.position.set(0, -0.6, 0);
+parts.lUpperLegGrp.add(parts.lLowerLegGrp);
+const lLowerLeg = makeCylinder(0.06, 0.05, 0.55, matBody);
+lLowerLeg.position.set(0, -0.275, 0);
+parts.lLowerLegGrp.add(lLowerLeg);
+const lFoot = makeSphere(0.07, matJoint);
+lFoot.position.set(0, -0.55, 0);
+parts.lLowerLegGrp.add(lFoot);
+
+parts.rUpperLegGrp = new THREE.Group();
+parts.rUpperLegGrp.position.set(0.18, 1.2, 0);
+man.add(parts.rUpperLegGrp);
+const rUpperLeg = makeCylinder(0.08, 0.07, 0.6, matBody);
+rUpperLeg.position.set(0, -0.3, 0);
+parts.rUpperLegGrp.add(rUpperLeg);
+const rKnee = makeSphere(0.09, matJoint);
+rKnee.position.set(0, -0.6, 0);
+parts.rUpperLegGrp.add(rKnee);
+
+parts.rLowerLegGrp = new THREE.Group();
+parts.rLowerLegGrp.position.set(0, -0.6, 0);
+parts.rUpperLegGrp.add(parts.rLowerLegGrp);
+const rLowerLeg = makeCylinder(0.06, 0.05, 0.55, matBody);
+rLowerLeg.position.set(0, -0.275, 0);
+parts.rLowerLegGrp.add(rLowerLeg);
+const rFoot = makeSphere(0.07, matJoint);
+rFoot.position.set(0, -0.55, 0);
+parts.rLowerLegGrp.add(rFoot);
+
+// ── Idle animation helpers ───────────────────────────────────
+let clock = { t: 0 };
+let currentPose = 'idle';
+let targetPose  = 'idle';
+let poseBlend   = 0; // 0→1 transition
+
+// Pose definitions: rotation values for limb groups
+// rotations: [lUpperArm.x, lUpperArm.z, lLowerArm.x, rUpperArm.x, rUpperArm.z, rLowerArm.x,
+//             lUpperLeg.x, lLowerLeg.x, rUpperLeg.x, rLowerLeg.x, head.x, head.y]
+const POSES = {
+  idle:    { lUA:[0, -0.3, 0], lLA:[0.2, 0, 0], rUA:[0,  0.3, 0], rLA:[0.2,0,0], lUL:[0.1,0,0], lLL:[0,0,0], rUL:[0.1,0,0], rLL:[0,0,0], hx:0, hy:0 },
+  hi:      { lUA:[-1.3,-0.5,0], lLA:[-0.5,0,0], rUA:[0, 0.3,0],  rLA:[0.2,0,0], lUL:[0.1,0,0], lLL:[0,0,0], rUL:[0.1,0,0], rLL:[0,0,0], hx:0.1, hy:0.3 },
+  good:    { lUA:[-1.0,-0.6,0], lLA:[-0.6,0.3,0], rUA:[-0.2, 0.3,0], rLA:[0.2,0,0], lUL:[0.1,0,0], lLL:[0,0,0], rUL:[0.1,0,0], rLL:[0,0,0], hx:0, hy:-0.2 },
+  thumbsup:{ lUA:[-0.5,-0.4,0], lLA:[0.3,0,0], rUA:[-1.0,0.5,0], rLA:[-0.3,0,0], lUL:[0.1,0,0], lLL:[0,0,0], rUL:[0.1,0,0], rLL:[0,0,0], hx:0.05, hy:0 },
+  like:    { lUA:[-0.4,-0.3,0], lLA:[0.5,-0.3,0], rUA:[-0.4,0.3,0], rLA:[0.5,0.3,0], lUL:[-0.3,0,0], lLL:[0.3,0,0], rUL:[-0.3,0,0], rLL:[0.3,0,0], hx:-0.1, hy:0 },
+  sus:     { lUA:[0.1,-0.4,0], lLA:[0.3,0,0], rUA:[0.1,0.4,0], rLA:[0.3,0,0], lUL:[-0.5,0.4,0], lLL:[0.5,0,0], rUL:[-0.1,0,0], rLL:[0,0,0], hx:0.2, hy:0.5 },
+};
+
+let currentRot = JSON.parse(JSON.stringify(POSES.idle));
+
+function lerpVal(a, b, t) { return a + (b - a) * t; }
+function lerpArr(a, b, t) { return a.map((v,i)=>lerpVal(v,b[i],t)); }
+
+function applyPose(p, blend) {
+  const from = currentRot;
+  const to   = POSES[p] || POSES.idle;
+  const t    = Math.min(blend, 1);
+
+  parts.lUpperArmGrp.rotation.x = lerpVal(from.lUA[0], to.lUA[0], t);
+  parts.lUpperArmGrp.rotation.z = lerpVal(from.lUA[1], to.lUA[1], t);
+  parts.lLowerArmGrp.rotation.x = lerpVal(from.lLA[0], to.lLA[0], t);
+
+  parts.rUpperArmGrp.rotation.x = lerpVal(from.rUA[0], to.rUA[0], t);
+  parts.rUpperArmGrp.rotation.z = lerpVal(from.rUA[1], to.rUA[1], t);
+  parts.rLowerArmGrp.rotation.x = lerpVal(from.rLA[0], to.rLA[0], t);
+
+  parts.lUpperLegGrp.rotation.x = lerpVal(from.lUL[0], to.lUL[0], t);
+  parts.lLowerLegGrp.rotation.x = lerpVal(from.lLL[0], to.lLL[0], t);
+  parts.rUpperLegGrp.rotation.x = lerpVal(from.rUL[0], to.rUL[0], t);
+  parts.rLowerLegGrp.rotation.x = lerpVal(from.rLL[0], to.rLL[0], t);
+
+  parts.head.rotation.x = lerpVal(from.hx||0, to.hx, t);
+  parts.head.rotation.y = lerpVal(from.hy||0, to.hy, t);
+}
+
+function setPose(name) {
+  if (targetPose !== name) {
+    // Save current animated state as "from"
+    currentRot = {
+      lUA: [parts.lUpperArmGrp.rotation.x, parts.lUpperArmGrp.rotation.z, 0],
+      lLA: [parts.lLowerArmGrp.rotation.x, 0, 0],
+      rUA: [parts.rUpperArmGrp.rotation.x, parts.rUpperArmGrp.rotation.z, 0],
+      rLA: [parts.rLowerArmGrp.rotation.x, 0, 0],
+      lUL: [parts.lUpperLegGrp.rotation.x, 0, 0],
+      lLL: [parts.lLowerLegGrp.rotation.x, 0, 0],
+      rUL: [parts.rUpperLegGrp.rotation.x, 0, 0],
+      rLL: [parts.rLowerLegGrp.rotation.x, 0, 0],
+      hx: parts.head.rotation.x,
+      hy: parts.head.rotation.y,
+    };
+    targetPose = name;
+    poseBlend  = 0;
+  }
+}
+
+// ── Hand position → man body position ───────────────────────
+// wrist landmark drives man's horizontal + bounce position
+let manX = 0, manY = 1;
+
+// ═══════════════════════════════════════════════════════════
+// CAMERA + HAND LANDMARK CANVAS
+// ═══════════════════════════════════════════════════════════
+const video     = document.getElementById('video');
+const camCanvas = document.getElementById('camCanvas');
+const camCtx    = camCanvas.getContext('2d');
+const handCanvas = document.getElementById('handCanvas');
+const hCtx      = handCanvas.getContext('2d');
+
+const LANDMARK_SHORT = [
+  'WRIST','T-CMC','T-MCP','T-IP','T-TIP',
+  'I-MCP','I-PIP','I-DIP','I-TIP',
+  'M-MCP','M-PIP','M-DIP','M-TIP',
+  'R-MCP','R-PIP','R-DIP','R-TIP',
+  'P-MCP','P-PIP','P-DIP','P-TIP'
+];
+
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]
+];
+
+function drawHandLandmarks(lm, w, h) {
+  hCtx.clearRect(0, 0, w, h);
+  // Lines
+  hCtx.strokeStyle = '#00ff88';
+  hCtx.lineWidth = 2;
+  for (const [a, b] of CONNECTIONS) {
+    hCtx.beginPath();
+    hCtx.moveTo(lm[a].x*w, lm[a].y*h);
+    hCtx.lineTo(lm[b].x*w, lm[b].y*h);
+    hCtx.stroke();
+  }
+  // Dots + labels
+  for (let i = 0; i < lm.length; i++) {
+    const x = lm[i].x * w, y = lm[i].y * h;
+    hCtx.beginPath();
+    hCtx.arc(x, y, 5, 0, Math.PI*2);
+    hCtx.fillStyle = '#ff3355';
+    hCtx.fill();
+    hCtx.strokeStyle = '#fff'; hCtx.lineWidth = 1;
+    hCtx.stroke();
+
+    const label = LANDMARK_SHORT[i];
+    hCtx.font = 'bold 9px Courier New';
+    const tw = hCtx.measureText(label).width;
+    hCtx.fillStyle = 'rgba(0,0,0,0.6)';
+    hCtx.fillRect(x+7, y-11, tw+5, 13);
+    hCtx.fillStyle = '#fff';
+    hCtx.fillText(label, x+9, y);
+  }
+}
+
+// ─── Gesture detection ────────────────────────────────────
+function isThumbUp(lm)        { return lm[4].x < lm[3].x; }
+function isFingerUp(lm, t, p) { return lm[t].y < lm[p].y; }
+function getFingers(lm) {
+  return [
+    isThumbUp(lm) ? 1:0,
+    isFingerUp(lm,8,6)  ?1:0,
+    isFingerUp(lm,12,10)?1:0,
+    isFingerUp(lm,16,14)?1:0,
+    isFingerUp(lm,20,18)?1:0,
+  ];
+}
+
+const GESTURES = {
+  '11111': { icon:'🖐️', msg:'HI',              color:'hi',   pose:'hi',      desc:'Open hand — Hello!' },
+  '10001': { icon:'🤙', msg:'GOOD',             color:'good', pose:'good',    desc:'Hang loose — Good vibes!' },
+  '10000': { icon:'👍', msg:'THIS IS MATHISHA', color:'math', pose:'thumbsup',desc:'Thumbs up — Mathisha!' },
+  '00000': { icon:'✊', msg:'I LIKE YOU',       color:'like', pose:'like',    desc:'Fist — I like you!' },
+  '01100': { icon:'✌️', msg:'A SUS FILE',       color:'sus',  pose:'sus',     desc:'Peace — A sus file! 📁' },
+};
+
+// ── DOM refs ──────────────────────────────────────────────
+const overlay = document.getElementById('gesture-overlay');
+const ovEmo   = document.getElementById('ov-emo');
+const ovMsg   = document.getElementById('ov-msg');
+const loading = document.getElementById('loading');
+const barIcon = document.getElementById('bar-icon');
+const barName = document.getElementById('bar-name');
+const barDesc = document.getElementById('bar-desc');
+const fingerDots = {
+  thumb:document.getElementById('dot-thumb'), index:document.getElementById('dot-index'),
+  middle:document.getElementById('dot-middle'), ring:document.getElementById('dot-ring'),
+  pinky:document.getElementById('dot-pinky'),
+};
+
+let lastKey = '';
+
+function updateUI(fingers, detected, lm) {
+  if (!detected) {
+    overlay.style.display = 'none';
+    barIcon.textContent = '—'; barName.textContent = 'NO HAND'; barDesc.textContent = 'Show your hand';
+    Object.values(fingerDots).forEach(e => e.classList.remove('up'));
+    setPose('idle');
+    return;
+  }
+
+  const key = fingers.join('');
+  const g   = GESTURES[key];
+
+  // Finger dots
+  const dk = ['thumb','index','middle','ring','pinky'];
+  fingers.forEach((f,i) => fingerDots[dk[i]].classList.toggle('up', f===1));
+
+  if (g) {
+    barIcon.textContent = g.icon;
+    barName.textContent = g.msg;
+    barDesc.textContent = g.desc;
+    if (key !== lastKey) {
+      lastKey = key;
+      ovEmo.textContent = g.icon;
+      ovMsg.textContent = g.msg;
+      ovMsg.className = 'msg color-' + g.color;
+      overlay.style.display = 'block';
+      setPose(g.pose);
+    }
+  } else {
+    barIcon.textContent = '🤚';
+    barName.textContent = fingers.join('');
+    barDesc.textContent = 'Custom gesture';
+    if (key !== lastKey) { lastKey = key; overlay.style.display = 'none'; setPose('idle'); }
+  }
+
+  // Drive man X position from wrist (mirrored)
+  if (lm) {
+    const wx = 1 - lm[0].x; // mirrored 0-1
+    const wy = lm[0].y;
+    manX = (wx - 0.5) * 3.5;
+    manY = 1 + (0.5 - wy) * 1.5;
+  }
+}
+
+// ── Three.js render loop ──────────────────────────────────
+let frameCount = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  frameCount++;
+  const t = frameCount * 0.016;
+
+  // Idle breathing / bob
+  const idleBob = Math.sin(t * 1.8) * 0.025;
+  man.position.y = manY + idleBob;
+  man.position.x += (manX - man.position.x) * 0.08; // smooth follow
+
+  // Slowly rotate man to face direction of movement
+  const dx = manX - man.position.x;
+  man.rotation.y += (-dx * 0.15 - man.rotation.y) * 0.05;
+
+  // Idle arm swing when idle
+  if (targetPose === 'idle') {
+    parts.lUpperArmGrp.rotation.x = Math.sin(t * 1.2) * 0.12;
+    parts.rUpperArmGrp.rotation.x = -Math.sin(t * 1.2) * 0.12;
+    parts.lUpperLegGrp.rotation.x = -Math.sin(t * 1.2) * 0.08;
+    parts.rUpperLegGrp.rotation.x = Math.sin(t * 1.2) * 0.08;
+  }
+
+  // Pose blending
+  if (targetPose !== 'idle') {
+    poseBlend = Math.min(poseBlend + 0.04, 1);
+    applyPose(targetPose, poseBlend);
+  }
+
+  // Head subtle look
+  parts.head.rotation.y += (Math.sin(t * 0.5) * 0.1 - parts.head.rotation.y) * 0.02;
+
+  renderer.render(scene, camera3);
+}
+
+// Resize
+function onResize() {
+  const wrap = document.getElementById('wrap');
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  renderer.setSize(w, h);
+  camera3.aspect = w / h;
+  camera3.updateProjectionMatrix();
+}
+window.addEventListener('resize', onResize);
+onResize();
+animate();
+
+// ── MediaPipe ─────────────────────────────────────────────
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+hands.setOptions({ maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.7, minTrackingConfidence:0.5 });
+
+hands.onResults(results => {
+  loading.style.display = 'none';
+  const w = camCanvas.width, h = camCanvas.height;
+  handCanvas.width = w; handCanvas.height = h;
+
+  // Draw mirrored camera
+  camCtx.save();
+  camCtx.scale(-1,1); camCtx.translate(-w,0);
+  camCtx.drawImage(results.image, 0, 0, w, h);
+  camCtx.restore();
+
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    const lm = results.multiHandLandmarks[0];
+    const mir = lm.map(p => ({ x:1-p.x, y:p.y, z:p.z }));
+    drawHandLandmarks(mir, w, h);
+    updateUI(getFingers(lm), true, lm);
+  } else {
+    hCtx.clearRect(0,0,handCanvas.width, handCanvas.height);
+    updateUI([], false, null);
+  }
+});
+
+const cam = new Camera(video, {
+  onFrame: async () => {
+    camCanvas.width  = video.videoWidth  || 640;
+    camCanvas.height = video.videoHeight || 480;
+    await hands.send({ image: video });
+  },
+  width: 640, height: 480,
+});
+cam.start().catch(err => {
+  loading.innerHTML = `<div style="color:#ff3355;font-size:0.78rem;padding:12px">
+    ⚠️ ${err.message}<br><span style="color:#666;font-size:0.65rem">Use http://localhost not file://</span>
+  </div>`;
+});
+</script>
+</body>
+</html>
